@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureRedact - Admin Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #eef2f9; }
+    header { background: #007bff; color: white; padding: 15px; text-align: center; }
+    .container { padding: 20px; max-width: 900px; margin: auto; }
+    .controls { margin: 20px 0; text-align: center; }
+    .controls input, .controls select, .controls button { margin: 5px; padding: 10px; }
+    .preview { text-align: center; margin-top: 20px; }
+    canvas { border: 1px solid #ccc; max-width: 100%; }
+    footer { text-align: center; padding: 15px; background: #222; color: #aaa; margin-top: 20px; }
+    footer a { color: white; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🔑 Admin Dashboard - SecureRedact</h1>
+    <p>Upload → Detect (Multi-Language) → Redact → Save for User</p>
+  </header>
+
+  <div class="container">
+    <div class="controls">
+      < input type="file" id="fileInput" accept="image/*,application/pdf"><br>
+
+      <!-- Language Selector -->
+      <label for="ocrLang">OCR Language:</label>
+      <select id="ocrLang">
+        <option value="eng">English</option>
+        <option value="tam">Tamil</option>
+        <option value="hin">Hindi</option>
+        <option value="kan">Kannada</option>
+        <option value="tel">Telugu</option>
+        <option value="mal">Malayalam</option>
+      </select>
+
+      <!-- Redaction Style -->
+      < select id="redactionType">
+        <option value="blur">Blur</option>
+        <option value="pixelate">Pixelate</option>
+        <option value="solid">Solid Black</option>
+      </select>
+
+      <button onclick="processOCR()">Process</button>
+      <button onclick="applyRedaction()">Redact</button>
+      <button onclick="saveForUser()">Save for User</button>
+    </div>
+
+    <div class="preview">
+      <canvas id="canvas"></canvas>
+    </div>
+  </div>
+
+  <footer>
+    <p>© 2025 SecureRedact | <a href="login.html">Logout</a></p>
+  </footer>
+
+  <!-- OCR + PDF.js -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+
+  <script>
+    let canvas = document.getElementById("canvas");
+    let ctx = canvas.getContext("2d");
+    let uploadedImage = null;
+    let sensitiveRegions = [];
+    let currentRedactionType = "blur";
+    // Protect Admin page
+if (localStorage.getItem("sessionRole") !== "admin") {
+  alert("Access denied! Please login as Admin.");
+  window.location.href = "login.html";
+}
+
+
+    document.getElementById("redactionType").addEventListener("change", (e) => {
+      currentRedactionType = e.target.value;
+    });
+
+    // File Upload
+    document.getElementById("fileInput").addEventListener("change", async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const fileType = file.type;
+      if (fileType.startsWith("image/")) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const img = new Image();
+          img.onload = function() {
+            canvas.width = img.width;
+            canvas.height = img.height;
+            ctx.drawImage(img, 0, 0);
+            uploadedImage = img;
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      } else if (fileType === "application/pdf") {
+        const fileReader = new FileReader();
+        fileReader.onload = async function() {
+          const typedArray = new Uint8Array(this.result);
+          const pdf = await pdfjsLib.getDocument(typedArray).promise;
+          const page = await pdf.getPage(1);
+          const viewport = page.getViewport({ scale: 2 });
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          await page.render({ canvasContext: ctx, viewport }).promise;
+          uploadedImage = new Image();
+          uploadedImage.src = canvas.toDataURL();
+        };
+        fileReader.readAsArrayBuffer(file);
+      } else {
+        alert("Unsupported file type. Please upload image or PDF.");
+      }
+    });
+
+    // OCR Processing
+    async function processOCR() {
+      if (!uploadedImage) {
+        alert("Please upload an image or PDF first!");
+        return;
+      }
+      ctx.drawImage(uploadedImage, 0, 0);
+      sensitiveRegions = [];
+
+      const lang = document.getElementById("ocrLang").value;
+
+      const { data } = await Tesseract.recognize(uploadedImage, lang, { logger: m => console.log(m) });
+
+      // Detect Aadhaar (12 digits), PAN, personal details
+      data.lines.forEach(line => {
+        const lineText = line.text.trim();
+
+        if (/^\d{4}\s\d{4}\s\d{4}$/.test(lineText)) { // Aadhaar
+          line.words.forEach(word => markWord(word));
+        }
+        if (/Name|DOB|Gender|Phone|Email|SSN|Address|Member ID|Group Number/i.test(lineText)) {
+          line.words.forEach(word => {
+            if (!/Name|DOB|Gender|Phone|Email|SSN|Address|Member|Group|Number/.test(word.text)) {
+              markWord(word);
+            }
+          });
+        }
+      });
+
+      if (sensitiveRegions.length === 0) {
+        alert("No sensitive information detected!");
+      } else {
+        alert("Sensitive regions detected. Click 'Redact' to hide them.");
+      }
+    }
+
+    function markWord(word) {
+      let box = word.bbox || word.boundingBox;
+      if (box) {
+        sensitiveRegions.push({ x: box.x0, y: box.y0, w: box.x1 - box.x0, h: box.y1 - box.y0 });
+        ctx.fillStyle = "rgba(255,255,0,0.4)";
+        ctx.fillRect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
+      }
+    }
+
+    // Apply Redaction
+    function applyRedaction() {
+      if (!uploadedImage) { alert("Please upload first!"); return; }
+      if (sensitiveRegions.length === 0) { alert("Run Process first."); return; }
+
+      ctx.drawImage(uploadedImage, 0, 0);
+      sensitiveRegions.forEach(region => {
+        if (currentRedactionType === "blur") {
+          const imageData = ctx.getImageData(region.x, region.y, region.w, region.h);
+          const tempCanvas = document.createElement("canvas");
+          tempCanvas.width = region.w;
+          tempCanvas.height = region.h;
+          const tempCtx = tempCanvas.getContext("2d");
+          tempCtx.putImageData(imageData, 0, 0);
+          const scale = 0.05;
+          const sw = Math.max(1, region.w * scale);
+          const sh = Math.max(1, region.h * scale);
+          const scaledCanvas = document.createElement("canvas");
+          scaledCanvas.width = sw;
+          scaledCanvas.height = sh;
+          const scaledCtx = scaledCanvas.getContext("2d");
+          scaledCtx.drawImage(tempCanvas, 0, 0, sw, sh);
+          tempCtx.clearRect(0, 0, region.w, region.h);
+          tempCtx.drawImage(scaledCanvas, 0, 0, sw, sh, 0, 0, region.w, region.h);
+          ctx.drawImage(tempCanvas, region.x, region.y);
+        } else if (currentRedactionType === "pixelate") {
+          const pixelSize = 10;
+          for (let y = 0; y < region.h; y += pixelSize) {
+            for (let x = 0; x < region.w; x += pixelSize) {
+              const data = ctx.getImageData(region.x + x, region.y + y, 1, 1).data;
+              ctx.fillStyle = `rgb(${data[0]},${data[1]},${data[2]})`;
+              ctx.fillRect(region.x + x, region.y + y, pixelSize, pixelSize);
+            }
+          }
+        } else if (currentRedactionType === "solid") {
+          ctx.fillStyle = "black";
+          ctx.fillRect(region.x, region.y, region.w, region.h);
+        }
+      });
+    }
+
+    // Save for User
+    function saveForUser() {
+      localStorage.setItem("redactedFile", canvas.toDataURL("image/png"));
+      alert("✅ Redacted file saved! User can now download it.");
+    }
+    
+  </script>
+  
+</body>
+</html>

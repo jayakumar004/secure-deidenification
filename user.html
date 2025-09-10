@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecureRedact - User Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #f4f6fb; }
+    header { background: #28a745; color: white; padding: 15px; text-align: center; }
+    .container { padding: 20px; max-width: 700px; margin: auto; text-align: center; }
+    canvas { border: 1px solid #ccc; margin-top: 20px; max-width: 100%; }
+    button { margin-top: 20px; padding: 12px 20px; border: none; border-radius: 5px; cursor: pointer; }
+    button.download { background: #28a745; color: white; }
+    footer { text-align: center; padding: 15px; background: #222; color: #aaa; margin-top: 20px; }
+    footer a { color: white; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>👤 User Dashboard - SecureRedact</h1>
+    <p>View & Download Your Redacted Document</p>
+  </header>
+
+  <div class="container">
+    <canvas id="userCanvas"></canvas>
+    <br>
+    <button class="download" onclick="downloadFile()">⬇ Download Redacted File</button>
+  </div>
+
+  <footer>
+    <p>© 2025 SecureRedact | <a href="login.html">Logout</a></p>
+  </footer>
+
+  <script>
+    
+    let canvas = document.getElementById("userCanvas");
+    let ctx = canvas.getContext("2d");
+
+    window.onload = function() {
+      const savedFile = localStorage.getItem("redactedFile");
+      if (savedFile) {
+        let img = new Image();
+        img.onload = function() {
+          canvas.width = img.width;
+          canvas.height = img.height;
+          ctx.drawImage(img, 0, 0);
+        };
+        img.src = savedFile;
+      } else {
+        alert("No redacted file available. Please ask admin to process.");
+      }
+    };
+    // Protect User page
+if (localStorage.getItem("sessionRole") !== "user") {
+  alert("Access denied! Please login as User.");
+  window.location.href = "login.html";
+}
+
+    function downloadFile() {
+      const savedFile = localStorage.getItem("redactedFile");
+      if (!savedFile) { alert("No file found!"); return; }
+      const link = document.createElement("a");
+      link.download = "redacted.png";
+      link.href = savedFile;
+      link.click();
+    }
+  </script>
+  
+</body>
+</html>
